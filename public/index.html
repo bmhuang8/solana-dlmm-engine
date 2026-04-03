@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meteora Sentinel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { gray: { 950: '#09090f' } } } }
+    };
+  </script>
+  <style>
+    body { font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen p-6">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-bold tracking-widest uppercase text-white">Meteora Sentinel</h1>
+      <span id="conn-dot" class="w-2 h-2 rounded-full bg-gray-600" title="disconnected"></span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span class="text-xs text-gray-500">SOL/USDC</span>
+      <span id="sol-price" class="text-2xl font-bold text-yellow-400">—</span>
+      <span id="last-update" class="text-xs text-gray-600">—</span>
+      <button id="kill-btn" onclick="triggerKill()"
+        class="px-3 py-1 text-xs font-bold uppercase tracking-widest rounded border border-red-700 text-red-400 hover:bg-red-900 hover:text-red-200 transition-colors">
+        ⏻ Kill
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Kill switch status ──────────────────────────────────────────────── -->
+  <div id="kill-msg" class="hidden mb-4 px-4 py-2 rounded text-sm font-mono"></div>
+
+  <!-- ── Strategy grid ───────────────────────────────────────────────────── -->
+  <div id="grid" class="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"></div>
+
+  <!-- ── No data state ───────────────────────────────────────────────────── -->
+  <p id="empty-msg" class="text-center text-gray-600 mt-16 text-sm">
+    Waiting for data from bot…
+  </p>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const grid       = document.getElementById('grid');
+    const emptyMsg   = document.getElementById('empty-msg');
+    const solPriceEl = document.getElementById('sol-price');
+    const lastUpEl   = document.getElementById('last-update');
+    const connDot    = document.getElementById('conn-dot');
+
+    // Track card element references keyed by runner id
+    const cards = new Map();
+
+    // ── Connection status ──────────────────────────────────────────────────
+    socket.on('connect',    () => { connDot.className = 'w-2 h-2 rounded-full bg-green-500'; connDot.title = 'connected'; });
+    socket.on('disconnect', () => { connDot.className = 'w-2 h-2 rounded-full bg-red-500';   connDot.title = 'disconnected'; });
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+    function fmtUsd(v) {
+      return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2);
+    }
+    function colorUsd(el, v) {
+      el.textContent = fmtUsd(v);
+      el.className = el.className.replace(/text-\w+-\d+/g, '');
+      el.classList.add(v >= 0 ? 'text-green-400' : 'text-red-400');
+    }
+
+    // ── Card creation ──────────────────────────────────────────────────────
+    function createCard(r) {
+      const div = document.createElement('div');
+      div.id = `card-${r.id}`;
+      div.className = 'bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3';
+      div.innerHTML = `
+        <div class="flex justify-between items-center">
+          <span class="text-base font-bold text-white">${r.label}</span>
+          <span class="range-tag px-2 py-0.5 text-xs rounded font-bold"></span>
+        </div>
+        <div class="grid grid-cols-2 gap-y-2 text-sm">
+          <span class="text-gray-500">Position</span>
+          <span class="val-pos text-right font-mono text-white"></span>
+
+          <span class="text-gray-500">Rebal cost</span>
+          <span class="val-rebal text-right font-mono text-orange-400"></span>
+
+          <span class="text-gray-500">IL</span>
+          <span class="val-il text-right font-mono text-red-400"></span>
+
+          <span class="text-gray-500">Fees earned</span>
+          <span class="val-fees text-right font-mono text-green-400"></span>
+
+          <span class="text-gray-500">F / IL</span>
+          <span class="val-fil text-right font-mono text-purple-400"></span>
+
+          <span class="text-gray-500 font-semibold">Net PnL</span>
+          <span class="val-pnl text-right font-mono font-bold"></span>
+        </div>
+        <div class="pt-2 border-t border-gray-800 flex justify-between items-center text-xs text-gray-500">
+          <span>iVol <span class="val-vol text-gray-300"></span></span>
+          <span>Bias <span class="val-bias text-gray-300"></span></span>
+          <button class="btn-rebal px-2 py-0.5 rounded border border-blue-700 text-blue-400 hover:bg-blue-900 hover:text-blue-200 transition-colors font-bold uppercase tracking-wider"
+                  onclick="triggerRebalance('${r.id}', this)">Reposition</button>
+        </div>
+      `;
+      grid.appendChild(div);
+      cards.set(r.id, {
+        rangeTag: div.querySelector('.range-tag'),
+        valPos:   div.querySelector('.val-pos'),
+        valRebal: div.querySelector('.val-rebal'),
+        valIl:    div.querySelector('.val-il'),
+        valFees:  div.querySelector('.val-fees'),
+        valFil:   div.querySelector('.val-fil'),
+        valPnl:   div.querySelector('.val-pnl'),
+        valVol:   div.querySelector('.val-vol'),
+        valBias:  div.querySelector('.val-bias'),
+        btnRebal: div.querySelector('.btn-rebal'),
+      });
+    }
+
+    // ── Card update ────────────────────────────────────────────────────────
+    function updateCard(r) {
+      if (!cards.has(r.id)) createCard(r);
+      const e = cards.get(r.id);
+
+      // Range badge
+      e.rangeTag.textContent = r.inRange ? 'IN' : 'OUT';
+      e.rangeTag.className = `range-tag px-2 py-0.5 text-xs rounded font-bold ${
+        r.inRange ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'
+      }`;
+
+      e.valPos.textContent  = `$${r.valueUsdc.toFixed(2)}`;
+      e.valRebal.textContent = r.rebalCostUsdc > 0 ? `-$${r.rebalCostUsdc.toFixed(4)}` : '--';
+      e.valIl.textContent   = r.ilUsdc >= 0 ? `-$${r.ilUsdc.toFixed(2)}` : `+$${Math.abs(r.ilUsdc).toFixed(2)}`;
+      e.valFees.textContent = `+$${r.feesUsdc.toFixed(2)}`;
+      e.valFil.textContent  = r.feeIlRatio;
+
+      colorUsd(e.valPnl, r.pnlUsdc);
+
+      e.valVol.textContent  = r.intervalVol.toFixed(2);
+      e.valBias.textContent = `${r.bias.toFixed(0)}% ${r.biasArrow}`;
+    }
+
+    // ── Kill switch ────────────────────────────────────────────────────────
+    const killMsg  = document.getElementById('kill-msg');
+    const killBtn  = document.getElementById('kill-btn');
+
+    function triggerKill() {
+      if (!confirm('Withdraw ALL positions now? This cannot be undone.')) return;
+      killBtn.disabled = true;
+      killBtn.textContent = 'Withdrawing…';
+      killBtn.className = killBtn.className.replace('border-red-700 text-red-400 hover:bg-red-900 hover:text-red-200', 'border-gray-600 text-gray-500 cursor-not-allowed');
+      socket.emit('kill_switch', { reason: 'dashboard button' });
+    }
+
+    socket.on('kill_switch', (data) => {
+      killMsg.textContent = data.result?.allSucceeded
+        ? '✓ Kill switch executed — all positions withdrawn.'
+        : '✗ Kill switch fired but one or more withdrawals failed. Check bot console.';
+      killMsg.className = `mb-4 px-4 py-2 rounded text-sm font-mono ${
+        data.result?.allSucceeded ? 'bg-green-950 text-green-300 border border-green-700' : 'bg-red-950 text-red-300 border border-red-700'
+      }`;
+      killBtn.textContent = '⏻ Kill';
+    });
+
+    socket.on('kill_switch_error', (data) => {
+      killMsg.textContent = `✗ Kill switch error: ${data.error}`;
+      killMsg.className = 'mb-4 px-4 py-2 rounded text-sm font-mono bg-red-950 text-red-300 border border-red-700';
+      killBtn.disabled = false;
+      killBtn.textContent = '⏻ Kill';
+    });
+
+    // ── Manual rebalance ─────────────────────────────────────────────────
+    let currentSolPrice = 0;
+
+    function triggerRebalance(strategyId, btn) {
+      if (!confirm(`Force reposition ${strategyId} now?`)) return;
+      btn.disabled = true;
+      btn.textContent = 'Repositioning…';
+      btn.className = btn.className.replace('border-blue-700 text-blue-400 hover:bg-blue-900 hover:text-blue-200', 'border-gray-600 text-gray-500 cursor-not-allowed');
+      socket.emit('manual_rebalance', { strategyId, solPrice: currentSolPrice });
+    }
+
+    socket.on('manual_rebalance_result', (data) => {
+      const c = cards.get(data.strategyId);
+      if (c?.btnRebal) {
+        c.btnRebal.disabled = false;
+        c.btnRebal.textContent = 'Reposition';
+        c.btnRebal.className = c.btnRebal.className.replace('border-gray-600 text-gray-500 cursor-not-allowed', 'border-blue-700 text-blue-400 hover:bg-blue-900 hover:text-blue-200');
+      }
+      if (!data.success) {
+        alert(`Reposition failed: ${data.error}`);
+      }
+    });
+
+    // Also reset button on rebalance_complete / rebalance_failed from the execution layer
+    socket.on('rebalance_complete', (data) => {
+      const c = cards.get(data.strategyId);
+      if (c?.btnRebal) {
+        c.btnRebal.disabled = false;
+        c.btnRebal.textContent = 'Reposition';
+        c.btnRebal.className = c.btnRebal.className.replace('border-gray-600 text-gray-500 cursor-not-allowed', 'border-blue-700 text-blue-400 hover:bg-blue-900 hover:text-blue-200');
+      }
+    });
+
+    socket.on('rebalance_failed', (data) => {
+      const c = cards.get(data.strategyId);
+      if (c?.btnRebal) {
+        c.btnRebal.disabled = false;
+        c.btnRebal.textContent = 'Reposition';
+        c.btnRebal.className = c.btnRebal.className.replace('border-gray-600 text-gray-500 cursor-not-allowed', 'border-blue-700 text-blue-400 hover:bg-blue-900 hover:text-blue-200');
+      }
+    });
+
+    // ── Main socket handler ────────────────────────────────────────────────
+    socket.on('state_update', (data) => {
+      currentSolPrice = data.solPrice;
+      solPriceEl.textContent = `$${data.solPrice.toFixed(2)}`;
+      lastUpEl.textContent   = new Date(data.timestamp).toLocaleTimeString();
+
+      if (data.runners.length > 0) {
+        emptyMsg.style.display = 'none';
+        data.runners.forEach(updateCard);
+      }
+    });
+  </script>
+</body>
+</html>

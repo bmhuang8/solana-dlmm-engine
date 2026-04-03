@@ -1,0 +1,26 @@
+{
+  "name": "meteora-sentinel",
+  "version": "0.1.0",
+  "description": "Read-only LP position monitor for Meteora DLMM on Solana",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "build": "tsc",
+    "discover": "ts-node scripts/discoverPositions.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.31.0",
+    "@meteora-ag/dlmm": "^1.9.4",
+    "@solana/web3.js": "1.98.0",
+    "bs58": "4.0.1",
+    "dotenv": "16.4.7",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "22.13.14",
+    "ts-node": "10.9.2",
+    "typescript": "5.7.3"
+  }
+}
