@@ -286,14 +286,17 @@ export class ExecutionRunner {
     this.state.currentPositionPubkey = newPubkey;
     this.state.rebalanceCount++;
     this.state.lastRebalanceMs = Date.now();
-    this.state.lastRebalanceFeesUsdc =
-      this.analyticsRunner.fees.lifetimeFeesUsdc;
     this.state.totalRebalanceCostUsdc += result.estimatedCostUsdc;
     this.state.totalSwapSlippageUsdc += result.swapSlippageUsdc;
 
     // Lock in realized metrics using the pre-rebalance snapshot (captured in tick()
     // before the rebalance was fired, when position state and price were known-good).
     this.analyticsRunner.captureRealizedMetrics(snapshotIlUsdc, snapshotFeesUsdc);
+
+    // Reset fee baseline to 0 — captureRealizedMetrics() just reset the fee tracker,
+    // so the new position starts from 0. If we kept the old value, the fee gate would
+    // compute a negative feesSinceLastRebalance and never pass.
+    this.state.lastRebalanceFeesUsdc = 0;
 
     // Record the measured wallet cost so PnL stays accurate
     if (result.measuredWalletCostUsdc != null) {

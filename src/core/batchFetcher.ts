@@ -49,7 +49,12 @@ interface StrategyCache {
   positionPubkey: PublicKey;
   /** All bin-array accounts covering this position's bin range */
   binArrayPubkeys: PublicKey[];
+  /** Consecutive poll cycles where the position account was missing */
+  missCount?: number;
 }
+
+/** How many consecutive misses before clearing the cache (handles RPC eventual consistency) */
+const MAX_MISS_COUNT = 3;
 
 /** Result of one fetch cycle */
 export interface BatchedState {
@@ -205,7 +210,32 @@ export async function fetchBatchedState(
   const strategySliceStart: number[] = [];
 
   for (let i = 0; i < strategies.length; i++) {
-    const cache = strategyCaches[i];
+    let cache = strategyCaches[i];
+
+    // If cache was cleared but the strategy has a valid pubkey (e.g. after a
+    // rebalance + transient RPC miss), try to recover it automatically.
+    if (!cache && strategies[i].positionPubkey) {
+      try {
+        const pubkey = new PublicKey(strategies[i].positionPubkey);
+        const lbPosition = await dlmmPool.getPosition(pubkey);
+        const { lowerBinId, upperBinId } = lbPosition.positionData;
+        const binArrayPubkeys = getBinArrayKeysCoverage(
+          new BN(lowerBinId),
+          new BN(upperBinId),
+          config.poolPubkey,
+          dlmmPool.program.programId
+        );
+        cache = { positionPubkey: pubkey, binArrayPubkeys };
+        strategyCaches[i] = cache;
+        console.log(
+          `[batchFetcher] ${strategies[i].id}: cache recovered → ${pubkey.toBase58().slice(0, 8)}… ` +
+            `(bins ${lowerBinId}–${upperBinId})`
+        );
+      } catch {
+        // Position doesn't exist on-chain yet — skip this cycle
+      }
+    }
+
     if (!cache) {
       strategySliceStart.push(-1);
       continue;
@@ -274,14 +304,26 @@ export async function fetchBatchedState(
         sliceStart + 1 + cache.binArrayPubkeys.length
       );
 
-      // Position account gone (user closed it) — bust cache, return empty
+      // Position account missing — could be RPC eventual consistency (just deployed)
+      // or truly closed. Only clear the cache after several consecutive misses.
       if (!positionAccInfo) {
-        console.warn(
-          `[batchFetcher] ${strategy.id}: position account missing — clearing cache.`
-        );
-        strategyCaches[i] = null;
+        const misses = (cache.missCount ?? 0) + 1;
+        if (misses >= MAX_MISS_COUNT) {
+          console.warn(
+            `[batchFetcher] ${strategy.id}: position missing for ${misses} cycles — clearing cache.`
+          );
+          strategyCaches[i] = null;
+        } else {
+          cache.missCount = misses;
+          console.warn(
+            `[batchFetcher] ${strategy.id}: position missing (${misses}/${MAX_MISS_COUNT}) — retrying next cycle.`
+          );
+        }
         return [strategy.id, emptyPosition(activeBinId)];
       }
+
+      // Account found — reset miss counter
+      cache.missCount = 0;
 
       try {
         const wrappedPosition = wrapPosition(
