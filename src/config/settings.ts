@@ -132,6 +132,50 @@ function optionalEnvBool(key: string, defaultValue: boolean): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Strategy builder — auto-discovers strategies from POSITION_PUBKEY_XX env vars
+// ---------------------------------------------------------------------------
+
+function buildStrategiesFromEnv(): StrategyConfig[] {
+  const strategies: StrategyConfig[] = [];
+
+  for (let i = 1; i <= 6; i++) {
+    const num = String(i).padStart(2, "0");
+    const pubkey = process.env[`POSITION_PUBKEY_${num}`];
+    if (!pubkey) continue;
+
+    // Parse optional STRATEGY_XX=binRadius,strategyType,outOfRangeBinThreshold,minRebalanceIntervalMs,feeGateMultiplier
+    const raw = process.env[`STRATEGY_${num}`];
+    const parts = raw ? raw.split(",").map((s) => s.trim()) : [];
+
+    const binRadius = parts[0] ? parseInt(parts[0], 10) : 10;
+    const strategyType = parts[1] ? parseInt(parts[1], 10) : 0;
+    const outOfRangeBinThreshold = parts[2] ? parseInt(parts[2], 10) : 0;
+    const minRebalanceIntervalMs = parts[3] ? parseInt(parts[3], 10) : 0;
+    const feeGateMultiplier = parts[4] ? parseFloat(parts[4]) : 1.0;
+
+    const totalBins = 2 * binRadius + 1;
+    strategies.push({
+      id: `strategy-${num}`,
+      label: `S${num}-${totalBins}BIN`,
+      positionPubkey: pubkey,
+      binRadius,
+      strategyType,
+      outOfRangeBinThreshold,
+      minRebalanceIntervalMs,
+      feeGateMultiplier,
+    });
+  }
+
+  if (strategies.length === 0) {
+    throw new Error(
+      "No strategies found — set at least POSITION_PUBKEY_01 in .env"
+    );
+  }
+
+  return strategies;
+}
+
+// ---------------------------------------------------------------------------
 // Build and export the config object
 // ---------------------------------------------------------------------------
 
@@ -153,53 +197,22 @@ export const config: AppConfig = {
   hedgingEnabled: false,
 
   // ---------------------------------------------------------------------------
-  // Forward-test strategies
+  // Forward-test strategies — auto-discovered from .env
   //
-  // Each entry corresponds to one on-chain position account.
-  // POSITION_PUBKEY_01 is the base58 address of the position account,
-  // found in the Meteora UI or by running getPositionsByUserAndLbPair.
+  // For each POSITION_PUBKEY_XX that exists, a strategy is created.
+  // Per-strategy settings are read from STRATEGY_XX env var (comma-separated):
+  //   STRATEGY_XX=binRadius,strategyType,outOfRangeBinThreshold,minRebalanceIntervalMs,feeGateMultiplier
   //
-  // To add more strategies:
-  //   1. Deploy a new position via the Meteora UI
-  //   2. Add POSITION_PUBKEY_0N=<base58> to your .env
-  //   3. Copy one of the entries below, update id/label/positionPubkey/entry
+  // Example .env:
+  //   POSITION_PUBKEY_01=<base58>
+  //   STRATEGY_01=4,0,0,0,1.0       # 9-bin, Spot, immediate rebal, no delay, 1x fee gate
+  //   POSITION_PUBKEY_02=<base58>
+  //   STRATEGY_02=9,0,0,0,1.0       # 19-bin
+  //
+  // If STRATEGY_XX is not set, defaults are used (binRadius=10, strategyType=0,
+  // outOfRangeBinThreshold=0, minRebalanceIntervalMs=0, feeGateMultiplier=1.0).
   // ---------------------------------------------------------------------------
-  strategies: [
-    {
-      id: "strategy-01",
-      label: "S01-9BIN",
-      positionPubkey: requireEnv("POSITION_PUBKEY_01"),
-      binRadius: 4,              // 9 bins total (±4 bins = ±0.4% range)
-      strategyType: 0,           // Spot distribution
-      outOfRangeBinThreshold: 0, // rebalance as soon as price leaves the range
-      minRebalanceIntervalMs: 0,
-      feeGateMultiplier: 1.0,    // fees must cover tx cost (1×) — fair test baseline
-    },
-    //{
-    //  id: "strategy-02",
-    //  label: "S02-19BIN",
-    //  positionPubkey: requireEnv("POSITION_PUBKEY_02"),
-    //  binRadius: 9,              // 19 bins total (±9 bins = ±0.9% range)
-    //  strategyType: 0,           // Spot distribution
-     // outOfRangeBinThreshold: 0, // rebalance as soon as price leaves the range
-     // minRebalanceIntervalMs: 0,
-     // feeGateMultiplier: 1.0,    // fees must cover tx cost (1×) — fair test baseline
-    //},
-    //{
-     // id: "strategy-03",
-      //label: "S03-31BIN",
-      //positionPubkey: requireEnv("POSITION_PUBKEY_03"),
-      //binRadius: 15,             // 31 bins total (±15 bins = ±1.5% range)
-      //strategyType: 0,           // Spot distribution
-      //outOfRangeBinThreshold: 0,
-      //minRebalanceIntervalMs: 0,
-      //feeGateMultiplier: 1.0,
-    //},
-    // { id: "strategy-04", label: "S04", positionPubkey: requireEnv("POSITION_PUBKEY_04") },
-    // { id: "strategy-04", label: "S04", positionPubkey: requireEnv("POSITION_PUBKEY_04") },
-    // { id: "strategy-05", label: "S05", positionPubkey: requireEnv("POSITION_PUBKEY_05") },
-    // { id: "strategy-06", label: "S06", positionPubkey: requireEnv("POSITION_PUBKEY_06") },
-  ],
+  strategies: buildStrategiesFromEnv(),
 };
 
 // ---------------------------------------------------------------------------
