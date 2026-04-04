@@ -367,26 +367,33 @@ async function main(): Promise<void> {
         })
         .filter((s): s is NonNullable<typeof s> => s !== null);
 
-      // --- 4. Append tick to JSONL log (one file per strategy) -------------
+      // --- 4. Append tick to JSONL log (one file per position) --------------
       for (const stats of tickResults) {
+        const pubkeyShort = stats.positionPubkey.slice(0, 8);
         const row = JSON.stringify({
+          type: "tick",
           ts: Date.now(),
           iso: new Date().toISOString(),
           strategyId: stats.id,
+          positionPubkey: stats.positionPubkey,
           price: price.onChainPrice,
           priceSource: price.source,
           activeBinId: batchedState.activeBinId,
           inRange: stats.inRange,
           posValue: stats.valueUsdc,
+          solAmount: stats.solAmount,
+          usdcAmount: stats.usdcAmount,
           ilUsdc: stats.ilUsdc,
+          realizedIlUsdc: stats.realizedIlUsdc,
           feesUsdc: stats.feesUsdc,
+          realizedFeesUsdc: stats.realizedFeesUsdc,
           feeIlRatio: stats.feeIlRatio,
           pnlUsdc: stats.pnlUsdc,
+          rebalCostUsdc: stats.rebalCostUsdc,
           iVol: stats.intervalVol,
-          bBandWidth: price.onChainPrice > 0 ? stats.intervalVol : 0,
           bias: stats.bias,
         });
-        const logPath = join(__dirname, "..", "logs", `${stats.id}.jsonl`);
+        const logPath = join(__dirname, "..", "logs", `${stats.id}_${pubkeyShort}.jsonl`);
         appendFileSync(logPath, row + "\n");
       }
 

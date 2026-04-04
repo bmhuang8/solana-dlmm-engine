@@ -59,10 +59,15 @@ export interface EntryState {
 export interface TickStats {
   id: string;
   label: string;
+  positionPubkey: string;
   inRange: boolean;
   valueUsdc: number;
+  solAmount: number;
+  usdcAmount: number;
   ilUsdc: number;
+  realizedIlUsdc: number;
   feesUsdc: number;
+  realizedFeesUsdc: number;
   /** Fees / IL ratio as a formatted string ("2.34x" or "--") */
   feeIlRatio: string;
   pnlUsdc: number;
@@ -359,10 +364,15 @@ export class StrategyRunner {
     return {
       id: this.id,
       label: this.label,
+      positionPubkey: this.currentPositionPubkey,
       inRange,
       valueUsdc: il.currentValueUsdc,
+      solAmount: position.totalSolAmount,
+      usdcAmount: position.totalUsdcAmount,
       ilUsdc: totalIlUsdc,
+      realizedIlUsdc: this.realizedIlUsdc,
       feesUsdc: totalFeesUsdc,
+      realizedFeesUsdc: this.realizedFeesUsdc,
       feeIlRatio,
       pnlUsdc: adjustedPnlUsdc,
       rebalCostUsdc: this.totalRebalanceCostsUsdc,

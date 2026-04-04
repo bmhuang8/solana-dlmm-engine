@@ -20,6 +20,8 @@
  */
 
 import { PublicKey } from "@solana/web3.js";
+import { appendFileSync, mkdirSync } from "fs";
+import { join } from "path";
 import { StrategyConfig, ExecutionConfig } from "../config/settings";
 import { PositionState } from "../core/position";
 import { PriceData } from "../core/priceFeed";
@@ -329,6 +331,30 @@ export class ExecutionRunner {
       swapSlippageUsdc: result.swapSlippageUsdc,
       timestamp: Date.now(),
     });
+
+    // Log rebalance event to both the old and new position JSONL files
+    const rebalEvent = JSON.stringify({
+      type: "rebalance",
+      ts: Date.now(),
+      iso: new Date().toISOString(),
+      strategyId: this.id,
+      oldPositionPubkey: positionPubkey.toBase58(),
+      newPositionPubkey: newPubkey.toBase58(),
+      rebalanceCount: this.state.rebalanceCount,
+      price: solPrice,
+      durationMs: result.durationMs,
+      measuredCostUsdc: result.measuredWalletCostUsdc ?? 0,
+      swapSlippageUsdc: result.swapSlippageUsdc,
+      snapshotIlUsdc: snapshotIlUsdc,
+      snapshotFeesUsdc: snapshotFeesUsdc,
+      signatures: result.signatures,
+    });
+    const logsDir = join(__dirname, "..", "..", "logs");
+    mkdirSync(logsDir, { recursive: true });
+    const oldShort = positionPubkey.toBase58().slice(0, 8);
+    const newShort = newPubkey.toBase58().slice(0, 8);
+    appendFileSync(join(logsDir, `${this.id}_${oldShort}.jsonl`), rebalEvent + "\n");
+    appendFileSync(join(logsDir, `${this.id}_${newShort}.jsonl`), rebalEvent + "\n");
   }
 
   // ---------------------------------------------------------------------------
